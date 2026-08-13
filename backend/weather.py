@@ -12,7 +12,7 @@ When weather conditions change via the frontend toggle, this module:
 The returned WeatherCondition object is passed to the full re-optimization
 pipeline (optimize_race_time), which recalculates the entire race strategy.
 
-AI-assisted development: Pure functions with no side effects for easy testing.
+All functions are pure (no side effects) and independently testable.
 """
 
 from __future__ import annotations

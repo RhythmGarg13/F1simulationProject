@@ -12,10 +12,10 @@ Charts generated:
   2. Monte Carlo Lap Time Distribution — histogram of simulated race times
   3. Strategy Comparison — bar chart comparing 1-stop vs 2-stop strategies
 
-AI-assisted development: Each function is independently testable and
-produces publication-quality figures with consistent F1-themed styling.
+Each function is independently testable and produces figures with
+consistent F1-themed styling (dark background, compound colour palette).
 
-Libraries: seaborn, matplotlib (as per resume).
+Libraries: seaborn, matplotlib.
 """
 
 from __future__ import annotations

@@ -19,8 +19,15 @@ export default function CircuitMap({ trackId, keyPoints = [], currentStint, isAn
   const progressRef  = useRef(0)
 
   const [tooltip, setTooltip] = useState(null)
+  const [usingFallback, setUsingFallback] = useState(false)
 
-  const trackDef = TRACK_PATHS[trackId] || TRACK_PATHS['suzuka']
+  const hasSvgData = Boolean(TRACK_PATHS[trackId])
+  const trackDef = TRACK_PATHS[trackId] || (() => {
+    if (!hasSvgData) {
+      console.warn(`[CircuitMap] No SVG path data for track '${trackId}' — falling back to Suzuka layout`)
+    }
+    return TRACK_PATHS['suzuka']
+  })()
   const compound = currentStint?.compound || 'MEDIUM'
   const carColor = TIRE_COLORS[compound] || TIRE_COLORS.MEDIUM
 
@@ -208,7 +215,9 @@ export default function CircuitMap({ trackId, keyPoints = [], currentStint, isAn
   // ── Animate car on track ───────────────────────────────────────────────
   useEffect(() => {
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
-    if (!isAnimating || !pathRef.current || !carRef.current) return
+    // Respect prefers-reduced-motion: skip animation if user has opted out
+    const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (!isAnimating || !pathRef.current || !carRef.current || prefersReduced) return
 
     const pathEl = pathRef.current
     const totalLen = pathEl.getTotalLength()
@@ -237,13 +246,16 @@ export default function CircuitMap({ trackId, keyPoints = [], currentStint, isAn
         display: 'flex', alignItems: 'center', gap: 6,
       }}>
         <span style={{ fontSize: '1.2rem' }}>{trackDef.country}</span>
-        <span style={{
+      {!hasSvgData && (
+        <span className="circuit-no-map-badge">⚠️ No map data for this circuit</span>
+      )}
+      <span style={{
           fontWeight: 700, fontSize: '0.75rem', color: 'var(--f1-navy)',
           background: 'rgba(255,255,255,0.85)',
           padding: '3px 8px', borderRadius: '6px',
           backdropFilter: 'blur(8px)',
           border: '1px solid rgba(26,31,58,0.1)',
-        }}>{trackDef.label}</span>
+        }}>{trackDef.label}{!hasSvgData ? ' (Fallback)' : ''}</span>
       </div>
 
       <svg

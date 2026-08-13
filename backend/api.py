@@ -4,35 +4,36 @@ api.py — F1 Race Strategy Simulation Engine
 FastAPI route definitions.
 
 Routes:
-  GET  /                        → Health check
-  GET  /tracks                  → List all F1 2026 tracks
-  GET  /tracks/{track_id}       → Track metadata + key points
-  POST /calculate_strategy      → Full race strategy calculation (main endpoint)
-  POST /update_weather          → Weather-only re-optimization (fast path)
+  GET  /                        -> Health check
+  GET  /tracks                  -> List all F1 2026 tracks
+  GET  /tracks/{track_id}       -> Track metadata + key points
+  POST /calculate_strategy      -> Full race strategy calculation (main endpoint)
+  POST /update_weather          -> Weather-only re-optimisation (fast path)
 
-All routes are async and non-blocking. The heavy computation (Monte Carlo +
-SLSQP optimization) is offloaded to a thread pool executor to keep the
-event loop free for concurrent requests.
+All routes are async and non-blocking. Heavy computation (Monte Carlo +
+SLSQP optimisation) is offloaded to a ThreadPoolExecutor to keep the event
+loop free for concurrent requests.
 
-AI-assisted development: Clean separation of route definitions from
-business logic. Routes are thin — they validate input, call service
-functions, and return structured responses.
+Error handling: exceptions are logged server-side with full tracebacks;
+clients receive a sanitised message that does not leak internal details.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
 from models import (
     RaceRequest, StrategyResponse, WeatherRequest,
     LapDataPoint, PitStop, TireStint, TrackKeyPointResponse,
-    MonteCarloStats, VisualizationData, WeatherType, TireCompoundName
+    MonteCarloStats, PitWindowPoint, VisualizationData, WeatherType, TireCompoundName,
+    WeatherCondition,
 )
 from track_data import get_track, list_tracks, TRACKS
 from monte_carlo import TIRE_COMPOUNDS
@@ -40,8 +41,25 @@ from optimizer import optimize_race_time
 from weather import build_weather_condition, select_starting_compound, get_weather_note
 from visualizations import generate_all_visualizations
 
+from pydantic import BaseModel
+
+logger = logging.getLogger("f1_engine.api")
+
 router = APIRouter()
 executor = ThreadPoolExecutor(max_workers=4)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pydantic request model for /update_weather
+# ─────────────────────────────────────────────────────────────────────────────
+
+class WeatherUpdateRequest(BaseModel):
+    """Request body for the weather update endpoint."""
+    track_id: str
+    driver_name: str = "VER"
+    team_name: str = "Red Bull Racing"
+    prev_weather_type: str = "DRY"
+    weather: WeatherRequest = WeatherRequest()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -49,7 +67,7 @@ executor = ThreadPoolExecutor(max_workers=4)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _format_time(total_seconds: float) -> str:
-    """Format seconds as H:MM:SS.s"""
+    """Format seconds as H:MM:SS.ss"""
     hours = int(total_seconds // 3600)
     minutes = int((total_seconds % 3600) // 60)
     secs = total_seconds % 60
@@ -66,7 +84,7 @@ def _build_strategy_response(
 ) -> StrategyResponse:
     """
     Transform optimizer output into a fully structured StrategyResponse
-    ready for JSON serialization and consumption by the frontend.
+    ready for JSON serialisation and consumption by the frontend.
     """
     track = get_track(request.track_id)
     weather = build_weather_condition(request.weather)
@@ -96,9 +114,7 @@ def _build_strategy_response(
         in_compound  = optimal_compounds[i]
         out_compound = optimal_compounds[min(i + 1, len(optimal_compounds) - 1)]
 
-        # Compute tire state at pit lap
         tire_age_at_pit = pit_lap - (optimal_pit_laps[i-1] if i > 0 else 0)
-
         compound_obj = TIRE_COMPOUNDS[in_compound]
         wear_at_pit = (tire_age_at_pit / compound_obj.max_laps) * 100
         cliff_warning = tire_age_at_pit >= compound_obj.cliff_lap * 0.85
@@ -130,7 +146,7 @@ def _build_strategy_response(
         stint_laps = lap_df[
             (lap_df["lap"] >= start_lap) & (lap_df["lap"] <= end_lap)
         ]
-        avg_time = float(stint_laps["lap_time_s"].mean()) if not stint_laps.empty else 0.0
+        avg_time  = float(stint_laps["lap_time_s"].mean()) if not stint_laps.empty else 0.0
         total_deg = float(stint_laps["lap_time_delta_s"].sum()) if not stint_laps.empty else 0.0
 
         stints.append(TireStint(
@@ -149,7 +165,6 @@ def _build_strategy_response(
     pit_window_str = f"L{optimal_pit_laps[0]}–L{optimal_pit_laps[-1]}" if optimal_pit_laps else "N/A"
 
     for kp in track.key_points:
-        # Bind relevant simulation data to each track point
         sim_data: dict = {}
         if kp.event_type.value == "PIT_WINDOW":
             sim_data = {
@@ -158,7 +173,6 @@ def _build_strategy_response(
                 "pit_loss_s": track.pit_loss_time_s,
             }
         elif kp.event_type.value in ("HIGH_G", "TIRE_STRESS"):
-            # Find the average wear at the relevant lap percentage
             mid_lap = track.total_laps // 2
             mid_row = lap_df[lap_df["lap"] == mid_lap]
             if not mid_row.empty:
@@ -182,16 +196,11 @@ def _build_strategy_response(
         ))
 
     # ── Monte Carlo stats ──────────────────────────────────────────────────
-    pit_window_dist = {}
-    for key, val in mc["pit_window_distribution"].items():
-        if isinstance(val, list):
-            if val and isinstance(val[0], dict):
-                pit_window_dist[key] = [
-                    {"lap": int(item["lap"]), "probability": float(item["probability"])}
-                    for item in val
-                ]
-            else:
-                pit_window_dist[key] = [float(v) for v in val]
+    pit_window_dist = {
+        key: [PitWindowPoint(lap=int(item["lap"]), probability=float(item["probability"]))
+              for item in val]
+        for key, val in mc["pit_window_distribution"].items()
+    }
 
     mc_stats = MonteCarloStats(
         n_simulations=mc["n_simulations"],
@@ -203,7 +212,7 @@ def _build_strategy_response(
         pit_window_distribution=pit_window_dist,
     )
 
-    # ── Visualizations ─────────────────────────────────────────────────────
+    # ── Visualisations ─────────────────────────────────────────────────────
     mc_times = mc.get("all_times", None)
     viz = None
     if mc_times is not None:
@@ -260,8 +269,8 @@ async def get_track_info(track_id: str):
     """Return metadata and key points for a specific track."""
     try:
         track = get_track(track_id)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Track '{track_id}' not found")
 
     return {
         "track_id": track.track_id,
@@ -293,22 +302,21 @@ async def calculate_strategy(request: RaceRequest):
 
     Runs the full pipeline:
       1. Build weather condition from request
-      2. Run SLSQP optimization (finds optimal pit laps + compounds)
-      3. Run Monte Carlo simulation (5000+ iterations)
-      4. Generate Seaborn/Matplotlib visualizations
+      2. Run SLSQP optimisation (finds optimal pit laps + compounds)
+      3. Run Monte Carlo simulation (configurable iterations)
+      4. Generate Seaborn/Matplotlib visualisations
       5. Return complete StrategyResponse JSON
 
-    The heavy computation runs in a thread pool to keep the event loop free.
+    Heavy computation runs in a thread pool to keep the event loop free.
     """
     try:
         track = get_track(request.track_id)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Track '{request.track_id}' not found")
 
     weather = build_weather_condition(request.weather)
     weather_note = get_weather_note(weather)
 
-    # Run optimization in thread pool (blocks CPU — don't run in event loop)
     loop = asyncio.get_event_loop()
     opt_fn = partial(
         optimize_race_time,
@@ -319,55 +327,45 @@ async def calculate_strategy(request: RaceRequest):
 
     try:
         opt_result = await loop.run_in_executor(executor, opt_fn)
-    except Exception as e:
-        raise HTTPException(status_code=500,
-                            detail=f"Optimization failed: {str(e)}")
+    except Exception:
+        logger.exception("Optimisation failed for track=%s", request.track_id)
+        raise HTTPException(status_code=500, detail="Strategy optimisation failed. Check server logs.")
 
     try:
         response = _build_strategy_response(request, opt_result, weather_note)
-    except Exception as e:
-        raise HTTPException(status_code=500,
-                            detail=f"Response build failed: {str(e)}")
+    except Exception:
+        logger.exception("Response assembly failed for track=%s", request.track_id)
+        raise HTTPException(status_code=500, detail="Failed to assemble strategy response. Check server logs.")
 
     return response
 
 
 @router.post("/update_weather", response_model=StrategyResponse)
-async def update_weather(
-    track_id: str,
-    driver_name: str,
-    team_name: str,
-    weather: WeatherRequest,
-    prev_weather_type: str = "DRY",
-):
+async def update_weather(body: WeatherUpdateRequest):
     """
-    Fast-path endpoint: Re-optimize strategy when only weather changes.
+    Fast-path endpoint: Re-optimise strategy when weather changes.
 
-    Called by the frontend WeatherToggle — triggers instant full re-optimization.
-    Returns a new StrategyResponse with strategy_delta highlighting what changed.
+    Called by the frontend WeatherToggle — triggers full re-optimisation.
+    Returns a new StrategyResponse with strategy_delta highlighting changes.
+    Accepts a single JSON body for consistency with /calculate_strategy.
     """
     try:
-        track = get_track(track_id)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        track = get_track(body.track_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Track '{body.track_id}' not found")
 
-    new_weather = build_weather_condition(weather)
-    
-    # Create previous weather for delta note generation
-    from models import WeatherCondition
-    prev_weather_obj = WeatherCondition(weather_type=WeatherType(prev_weather_type))
-    
+    new_weather = build_weather_condition(body.weather)
+    prev_weather_obj = WeatherCondition(weather_type=WeatherType(body.prev_weather_type))
     weather_note = get_weather_note(new_weather, prev_weather_obj)
 
-    # Re-select starting compound for new conditions
     new_starting_compound = select_starting_compound(new_weather)
 
     request = RaceRequest(
-        track_id=track_id,
-        driver_name=driver_name,
-        team_name=team_name,
+        track_id=body.track_id,
+        driver_name=body.driver_name,
+        team_name=body.team_name,
         starting_compound=new_starting_compound,
-        weather=weather,
+        weather=body.weather,
     )
 
     loop = asyncio.get_event_loop()
@@ -375,16 +373,17 @@ async def update_weather(
         optimize_race_time,
         track=track,
         weather=new_weather,
-        n_simulations=3000,  # Faster re-calc for weather updates
+        n_simulations=3000,
     )
 
     try:
         opt_result = await loop.run_in_executor(executor, opt_fn)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Re-optimization failed: {str(e)}")
+    except Exception:
+        logger.exception("Weather re-optimisation failed for track=%s", body.track_id)
+        raise HTTPException(status_code=500, detail="Weather re-optimisation failed. Check server logs.")
 
     strategy_delta = (
-        f"Strategy updated: {prev_weather_type} → {weather.weather_type.value}. "
+        f"Strategy updated: {body.prev_weather_type} → {body.weather.weather_type.value}. "
         f"Starting compound changed to {new_starting_compound.value}."
     )
 

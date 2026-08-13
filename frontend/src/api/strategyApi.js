@@ -3,6 +3,10 @@
  *
  * Axios-based API client for communicating with the FastAPI backend.
  * All calls go through the Vite proxy (/api → http://localhost:8000/api).
+ *
+ * Error handling: a response interceptor normalises error messages from
+ * the backend detail field or the axios message in one place, so callers
+ * receive a plain string and don't need to repeat fallback logic.
  */
 import axios from 'axios'
 
@@ -10,21 +14,33 @@ const BASE_URL = '/api'
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 120000,  // 2 min — Monte Carlo can take time
+  timeout: 20000,  // 20 s — sufficient after Phase 2 perf fix (was 120 s)
   headers: { 'Content-Type': 'application/json' },
 })
+
+// Normalise error messages from backend or network in one place
+api.interceptors.response.use(
+  (response) => response,
+  (err) => {
+    const message =
+      err.response?.data?.detail ||
+      err.message ||
+      'Unknown error — check that the backend is running on port 8000'
+    return Promise.reject(new Error(message))
+  }
+)
 
 /**
  * Calculate the full race strategy for a given track + weather.
  * @param {Object} params
  * @param {string} params.trackId
- * @param {string} params.driverName
- * @param {string} params.teamName
- * @param {number} params.initialFuelKg
- * @param {string} params.startingCompound
- * @param {number} params.startingPosition
- * @param {number} params.nSimulations
- * @param {Object} params.weather
+ * @param {string} [params.driverName]
+ * @param {string} [params.teamName]
+ * @param {number} [params.initialFuelKg]
+ * @param {string} [params.startingCompound]
+ * @param {number} [params.startingPosition]
+ * @param {number} [params.nSimulations]
+ * @param {Object} [params.weather]
  * @returns {Promise<Object>} StrategyResponse
  */
 export async function calculateStrategy(params) {
@@ -68,19 +84,25 @@ export async function fetchTrack(trackId) {
 }
 
 /**
- * Update weather and trigger re-optimization.
+ * Update weather and trigger re-optimisation.
+ * Sends a single JSON body to POST /update_weather.
  * @param {Object} params
  * @returns {Promise<Object>} Updated StrategyResponse
  */
 export async function updateWeather(params) {
-  const url = `/update_weather?track_id=${params.trackId}&driver_name=${encodeURIComponent(params.driverName)}&team_name=${encodeURIComponent(params.teamName)}&prev_weather_type=${params.prevWeatherType}`
   const payload = {
-    weather_type: params.weather.type,
-    air_temp_c: params.weather.airTemp || 20.0,
-    track_temp_c: params.weather.trackTemp || 28.0,
-    rain_intensity: params.weather.rainIntensity || 0.0,
-    wind_speed_kph: params.weather.windSpeed || 10.0,
+    track_id: params.trackId,
+    driver_name: params.driverName || 'VER',
+    team_name: params.teamName || 'Red Bull Racing',
+    prev_weather_type: params.prevWeatherType || 'DRY',
+    weather: {
+      weather_type: params.weather.type,
+      air_temp_c: params.weather.airTemp || 20.0,
+      track_temp_c: params.weather.trackTemp || 28.0,
+      rain_intensity: params.weather.rainIntensity || 0.0,
+      wind_speed_kph: params.weather.windSpeed || 10.0,
+    },
   }
-  const { data } = await api.post(url, payload)
+  const { data } = await api.post('/update_weather', payload)
   return data
 }

@@ -5,8 +5,8 @@ Data classes and Pydantic schemas for the simulation engine.
 Defines the core domain objects: TireCompound, CarState, Track,
 WeatherCondition, and all API request/response schemas.
 
-AI-assisted development: modular design with clear separation of concerns.
-Each class is self-documenting with type hints and docstrings.
+Pydantic models are used for both internal validation and OpenAPI schema
+generation. Dataclasses handle the simulation engine's mutable state.
 """
 
 from __future__ import annotations
@@ -226,6 +226,12 @@ class TrackKeyPointResponse(BaseModel):
     simulation_data: Dict[str, Any] = {}
 
 
+class PitWindowPoint(BaseModel):
+    """A single lap/probability pair in a pit-stop window distribution."""
+    lap: int
+    probability: float
+
+
 class MonteCarloStats(BaseModel):
     """Statistical summary of the Monte Carlo simulation run."""
     n_simulations: int
@@ -234,7 +240,7 @@ class MonteCarloStats(BaseModel):
     confidence_interval_95_low: float
     confidence_interval_95_high: float
     optimal_strategy_probability: float
-    pit_window_distribution: Dict[str, List[float]]
+    pit_window_distribution: Dict[str, List[PitWindowPoint]]
 
 
 class VisualizationData(BaseModel):

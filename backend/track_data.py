@@ -12,8 +12,7 @@ Each track includes:
 SVG coordinate system: (0.0, 0.0) = top-left, (1.0, 1.0) = bottom-right
 of the circuit's SVG viewBox.
 
-AI-assisted development: Modular registry pattern — tracks are stored
-in a dictionary indexed by track_id for O(1) lookup by the API layer.
+Tracks are stored in a dict indexed by track_id for O(1) lookup by the API.
 """
 
 from models import Track, Sector, KeyPoint, EventType
