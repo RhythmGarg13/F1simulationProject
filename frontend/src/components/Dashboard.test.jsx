@@ -72,20 +72,24 @@ describe('Dashboard', () => {
 
   it('renders loading state while isLoading is true', async () => {
     // Keep the promise pending so loading stays true
-    calculateStrategy.mockReturnValue(new Promise(() => {}))
+    calculateStrategy.mockReturnValue(new Promise(() => { }))
 
     render(React.createElement(Dashboard))
 
-    // The loading overlay text should appear
+    // The loading overlay text should appear. Both the circuit-map card and
+    // the race-analysis card show a loading overlay simultaneously, so more
+    // than one match is expected — use getAllByText instead of getByText.
     await waitFor(() => {
-      expect(screen.getByText(/Monte Carlo Simulation/i)).toBeInTheDocument()
+      const matches = screen.getAllByText(/Monte Carlo Simulation/i)
+      expect(matches.length).toBeGreaterThan(0)
+      matches.forEach(el => expect(el).toBeInTheDocument())
     }, { timeout: 2000 })
   })
 
   it('falls back to TRACK_PATHS when fetchTracks rejects', async () => {
     fetchTracks.mockRejectedValue(new Error('Network error'))
     // Keep strategy pending to prevent errors from strategy call
-    calculateStrategy.mockReturnValue(new Promise(() => {}))
+    calculateStrategy.mockReturnValue(new Promise(() => { }))
 
     render(React.createElement(Dashboard))
 
