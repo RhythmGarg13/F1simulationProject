@@ -440,7 +440,7 @@ def optimize_race_time(
         "optimal_pit_laps": optimal_pit_laps,
         "optimal_compounds": optimal_compounds,
         "optimal_time_s": best_time,
-        "converged": best_result.success if best_result else False,
+        "converged": bool(best_result.success) if best_result else False,
         "n_iterations": total_iterations,
         "constraint_norm": constraint_norm,
         "monte_carlo": mc_result,
