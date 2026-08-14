@@ -56,7 +56,7 @@ function CardShell({ title, icon, badge, children, style, idx = 0 }) {
 
 function LoadingOverlay() {
   return (
-    <div className="loading-overlay" data-testid={testid}>
+    <div className="loading-overlay" data-testid={testId}>
       <div className="loading-overlay__spinner-wrap">
         <div className="spinner loading-overlay__spinner" />
         <div className="loading-overlay__car">🏎️</div>
