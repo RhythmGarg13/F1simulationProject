@@ -13,16 +13,16 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { calculateStrategy, fetchTracks, updateWeather } from '../api/strategyApi'
 import { TRACK_PATHS } from '../data/trackPaths'
 
-import CircuitMap    from './CircuitMap'
-import LapTimeChart  from './LapTimeChart'
-import PitStrategy   from './PitStrategy'
-import TireStrategy  from './TireStrategy'
+import CircuitMap from './CircuitMap'
+import LapTimeChart from './LapTimeChart'
+import PitStrategy from './PitStrategy'
+import TireStrategy from './TireStrategy'
 import TelemetryCard from './TelemetryCard'
 import WeatherToggle from './WeatherToggle'
-import Header        from './Header'
-import ErrorBanner   from './ErrorBanner'
-import StatsRow      from './StatsRow'
-import Footer        from './Footer'
+import Header from './Header'
+import ErrorBanner from './ErrorBanner'
+import StatsRow from './StatsRow'
+import Footer from './Footer'
 
 const CARD_VARIANTS = {
   hidden: { opacity: 0, y: 20 },
@@ -56,7 +56,7 @@ function CardShell({ title, icon, badge, children, style, idx = 0 }) {
 
 function LoadingOverlay() {
   return (
-    <div className="loading-overlay">
+    <div className="loading-overlay" data-testid={testid}>
       <div className="loading-overlay__spinner-wrap">
         <div className="spinner loading-overlay__spinner" />
         <div className="loading-overlay__car">🏎️</div>
@@ -72,17 +72,17 @@ function LoadingOverlay() {
 }
 
 export default function Dashboard() {
-  const [tracks, setTracks]         = useState([])
-  const [trackId, setTrackId]       = useState('suzuka')
-  const [strategy, setStrategy]     = useState(null)
-  const [isLoading, setIsLoading]   = useState(false)
+  const [tracks, setTracks] = useState([])
+  const [trackId, setTrackId] = useState('suzuka')
+  const [strategy, setStrategy] = useState(null)
+  const [isLoading, setIsLoading] = useState(false)
   const [isWeatherLoading, setIsWeatherLoading] = useState(false)
-  const [error, setError]           = useState(null)
-  const [weather, setWeather]       = useState({
+  const [error, setError] = useState(null)
+  const [weather, setWeather] = useState({
     type: 'DRY', airTemp: 26, trackTemp: 42, rainIntensity: 0, windSpeed: 8,
   })
   const [isAnimating, setIsAnimating] = useState(true)
-  const [activeTab, setActiveTab]     = useState('lap_times')
+  const [activeTab, setActiveTab] = useState('lap_times')
   const prevWeatherRef = useRef('DRY')
 
   // Fetch tracks list on mount
@@ -183,7 +183,7 @@ export default function Dashboard() {
             style={{ overflow: 'hidden' }}
           >
             {isLoading ? (
-              <LoadingOverlay />
+              <LoadingOverlay testId="circuit-map-loading" />
             ) : (
               <>
                 <div className="circuit-map-wrap">
@@ -256,7 +256,7 @@ export default function Dashboard() {
               <div className="tab-content">
                 <AnimatePresence mode="wait">
                   {isLoading ? (
-                    <LoadingOverlay />
+                    <LoadingOverlay testId="lap-chart-loading" />
                   ) : activeTab === 'lap_times' ? (
                     <motion.div key="laps" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                       <LapTimeChart
