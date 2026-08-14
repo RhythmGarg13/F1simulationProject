@@ -54,7 +54,7 @@ function CardShell({ title, icon, badge, children, style, idx = 0 }) {
   )
 }
 
-function LoadingOverlay() {
+function LoadingOverlay({ testId }) {
   return (
     <div className="loading-overlay" data-testid={testId}>
       <div className="loading-overlay__spinner-wrap">
